@@ -9,9 +9,30 @@ import openai
 from litellm import completion
 import configparser
 import os
+import tiktoken
 
 config = configparser.ConfigParser()
 config.read("config.ini")
+
+def num_tokens_from_messages(messages, model):
+    """Возвращает количество токенов, используемых списком сообщений."""
+    try:
+        encoding = tiktoken.encoding_for_model(model)  # Пытаемся получить кодировку для выбранной модели
+    except KeyError:
+        encoding = tiktoken.get_encoding("cl100k_base")  # если не получается, используем кодировку "cl100k_base"
+
+    if model in ["gpt-3.5-turbo-0301", "gpt-3.5-turbo-0613", "gpt-3.5-turbo-16k", "gpt-3.5-turbo"]:
+        num_tokens = 0
+        for message in messages:
+            num_tokens += 4  # каждое сообщение следует за <im_start>{role/name}\n{content}<im_end>\n, что равно 4 токенам
+            for key, value in message.items():
+                num_tokens += len(encoding.encode(value))
+                if key == "name":
+                    num_tokens += -1  # роль всегда требуется и всегда занимает 1 токен, так что мы вычитаем его, если имя присутствует
+        num_tokens += 2  # каждый ответ начинается с <im_start>assistant, что добавляет еще 2 токена
+        return num_tokens
+    else:
+        raise NotImplementedError(f"num_tokens_from_messages() is not presently implemented for model {model}.")
 
 
 # Функция создания индексной базы знаний
@@ -61,6 +82,9 @@ def answer_index(system, topic, message_content, temp):
         {"role": "system", "content": system},
         {"role": "user", "content": f"Here is the document with information to respond to the client: {message_content}\n\n Here is the client's question: \n{topic}"}
     ]
+# Подсчет количества токенов перед отправкой запроса
+    num_tokens = num_tokens_from_messages(messages, model="gpt-3.5-turbo")
+    print(f"Number of tokens in the request: {num_tokens}")
 
     response = completion(
         model="ollama/llama3.2:1b",
